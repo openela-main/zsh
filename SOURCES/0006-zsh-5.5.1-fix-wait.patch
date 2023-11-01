@@ -1,0 +1,28 @@
+From 6af0b07cc7950159129156cb85ef3f72fdd828cc Mon Sep 17 00:00:00 2001
+From: Peter Stephenson <p.w.stephenson@ntlworld.com>
+Date: Sat, 3 Aug 2019 19:48:18 +0100
+Subject: [PATCH] 44635: Don't apply STAT_NOPRINT to backgrounded jobs
+
+Upstream-commit: e0d063a2ade821baf570eb300d4be93692b494f8
+Signed-off-by: Kamil Dudka <kdudka@redhat.com>
+---
+ Src/exec.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Src/exec.c b/Src/exec.c
+index 8045db2..da089d6 100644
+--- a/Src/exec.c
++++ b/Src/exec.c
+@@ -1666,7 +1666,8 @@ execpline(Estate state, wordcode slcode, int how, int last1)
+ 
+ 	    lastwj = thisjob = newjob;
+ 
+-	    if (list_pipe || (pline_level && !(how & Z_TIMED)))
++	    if (list_pipe || (pline_level && !(how & Z_TIMED) &&
++			      !(jn->stat & STAT_NOSTTY)))
+ 		jn->stat |= STAT_NOPRINT;
+ 
+ 	    if (nowait) {
+-- 
+2.34.1
+

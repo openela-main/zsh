@@ -1,0 +1,266 @@
+From bc943b78268ad633f79756639d4295f7b61dbedd Mon Sep 17 00:00:00 2001
+From: Kamil Dudka <kdudka@redhat.com>
+Date: Wed, 7 Nov 2018 14:04:52 +0100
+Subject: [PATCH 1/5] 43791: File descriptor could be closed twice in clone
+
+Upstream-commit: a8cc017c74a916b690dc074c299faf4bd24b5af4
+Signed-off-by: Kamil Dudka <kdudka@redhat.com>
+
+Error: USE_AFTER_FREE (CWE-825):
+zsh-5.5.1/Src/Modules/clone.c:71: closed_arg: "close(int)" closes "ttyfd".
+zsh-5.5.1/Src/Modules/clone.c:99: double_close: Calling "close(int)" closes handle "ttyfd" which has already been closed.
+ 97|   	setsparam("TTY", ztrdup(ttystrname));
+ 98|       }
+ 99|->     close(ttyfd);
+100|       if (pid < 0) {
+101|   	zerrnam(nam, "fork failed: %e", errno);
+---
+ Src/Modules/clone.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Src/Modules/clone.c b/Src/Modules/clone.c
+index 9304292..dfd8e8a 100644
+--- a/Src/Modules/clone.c
++++ b/Src/Modules/clone.c
+@@ -96,7 +96,8 @@ bin_clone(char *nam, char **args, UNUSED(Options ops), UNUSED(int func))
+ 	init_io(NULL);
+ 	setsparam("TTY", ztrdup(ttystrname));
+     }
+-    close(ttyfd);
++    else
++	close(ttyfd);
+     if (pid < 0) {
+ 	zerrnam(nam, "fork failed: %e", errno);
+ 	return 1;
+-- 
+2.17.2
+
+
+From 6096988f02635ed336a056e3670b63070400e6bc Mon Sep 17 00:00:00 2001
+From: Kamil Dudka <kdudka@redhat.com>
+Date: Wed, 7 Nov 2018 14:04:53 +0100
+Subject: [PATCH 2/5] 43793: computil could overrun buffer
+
+Upstream-commit: 031afe420725e328e9d7742be69ef0bd81c62b9a
+Signed-off-by: Kamil Dudka <kdudka@redhat.com>
+
+Error: BUFFER_SIZE (CWE-120):
+zsh-5.5.1/Src/Zle/computil.c:564: overlapping_buffer: The source buffer "str->str + 2" potentially overlaps with the destination buffer "str->str", which results in undefined behavior for "strcpy".
+zsh-5.5.1/Src/Zle/computil.c:564: remediation: Replace "strcpy(dest, src)" with "memmove(dest, src, strlen(src)+1)".
+562|                       str->str = ztrdup(str->str);
+563|                   if (hide[1] && str->str[0] == '-' && str->str[1] == '-')
+564|->                     strcpy(str->str, str->str + 2);
+565|                   else if (str->str[0] == '-' || str->str[0] == '+')
+566|                       strcpy(str->str, str->str + 1);
+
+Error: BUFFER_SIZE (CWE-120):
+zsh-5.5.1/Src/Zle/computil.c:566: overlapping_buffer: The source buffer "str->str + 1" potentially overlaps with the destination buffer "str->str", which results in undefined behavior for "strcpy".
+zsh-5.5.1/Src/Zle/computil.c:566: remediation: Replace "strcpy(dest, src)" with "memmove(dest, src, strlen(src)+1)".
+564|                       strcpy(str->str, str->str + 2);
+565|                   else if (str->str[0] == '-' || str->str[0] == '+')
+566|->                     strcpy(str->str, str->str + 1);
+567|               }
+568|           }
+---
+ Src/Zle/computil.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/Src/Zle/computil.c b/Src/Zle/computil.c
+index 5526e0a..cb1c010 100644
+--- a/Src/Zle/computil.c
++++ b/Src/Zle/computil.c
+@@ -561,9 +561,9 @@ cd_init(char *nam, char *hide, char *mlen, char *sep,
+                 if (str->str == str->match)
+                     str->str = ztrdup(str->str);
+                 if (hide[1] && str->str[0] == '-' && str->str[1] == '-')
+-                    strcpy(str->str, str->str + 2);
++                    memmove(str->str, str->str + 2, strlen(str->str) - 1);
+                 else if (str->str[0] == '-' || str->str[0] == '+')
+-                    strcpy(str->str, str->str + 1);
++                    memmove(str->str, str->str + 1, strlen(str->str));
+             }
+         }
+ 	for (ap = args; *args &&
+-- 
+2.17.2
+
+
+From 29445bdf10714bd41d2124d3c31cc16c1f682854 Mon Sep 17 00:00:00 2001
+From: Kamil Dudka <kdudka@redhat.com>
+Date: Wed, 7 Nov 2018 14:04:54 +0100
+Subject: [PATCH 3/5] 43723: file descriptor could leak on fork error
+
+Upstream-commit: d1095bdf744c190c7e8ff126ba02caea8f63880d
+Signed-off-by: Kamil Dudka <kdudka@redhat.com>
+
+Error: RESOURCE_LEAK (CWE-772):
+zsh-5.5.1/Src/exec.c:4680: open_fn: Returning handle opened by "open".
+zsh-5.5.1/Src/exec.c:4680: var_assign: Assigning: "fd" = handle returned from "open(nam, 449, 384)".
+zsh-5.5.1/Src/exec.c:4810: leaked_handle: Handle variable "fd" going out of scope leaks the handle.
+4808|   	/* fork or open error */
+4809|   	child_unblock();
+4810|-> 	return nam;
+4811|       } else if (pid) {
+4812|   	int os;
+---
+ Src/exec.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Src/exec.c b/Src/exec.c
+index 0908a1a..8045db2 100644
+--- a/Src/exec.c
++++ b/Src/exec.c
+@@ -4722,7 +4722,8 @@ getoutputfile(char *cmd, char **eptr)
+     }
+ 
+     if ((cmdoutpid = pid = zfork(NULL)) == -1) {
+-	/* fork or open error */
++	/* fork error */
++	close(fd);
+ 	child_unblock();
+ 	return nam;
+     } else if (pid) {
+-- 
+2.17.2
+
+
+From afb4192a75066f86ce7051a72c0feb7b80c0cdd8 Mon Sep 17 00:00:00 2001
+From: Kamil Dudka <kdudka@redhat.com>
+Date: Wed, 7 Nov 2018 14:04:55 +0100
+Subject: [PATCH 4/5] 43789: possible use after free clearing up math func from
+ module
+
+Upstream-commit: e27175c7c8cdfeb4e28d4ff21eb51aa003d70a03
+Signed-off-by: Kamil Dudka <kdudka@redhat.com>
+
+Error: USE_AFTER_FREE (CWE-825):
+zsh-5.5.1/Src/module.c:1390: freed_arg: "deletemathfunc" frees "f".
+zsh-5.5.1/Src/module.c:1352:6: freed_arg: "zfree" frees parameter "f".
+zsh-5.5.1/Src/mem.c:1888:5: freed_arg: "free" frees parameter "p".
+zsh-5.5.1/Src/module.c:1394: deref_after_free: Dereferencing freed pointer "f".
+1392|   		ret = 1;
+1393|   	    } else {
+1394|-> 		f->flags &= ~MFF_ADDED;
+1395|   	    }
+1396|   	}
+---
+ Src/module.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/Src/module.c b/Src/module.c
+index 4ae7831..33d75eb 100644
+--- a/Src/module.c
++++ b/Src/module.c
+@@ -1390,8 +1390,6 @@ setmathfuncs(char const *nam, MathFunc f, int size, int *e)
+ 	    if (deletemathfunc(f)) {
+ 		zwarnnam(nam, "math function `%s' already deleted", f->name);
+ 		ret = 1;
+-	    } else {
+-		f->flags &= ~MFF_ADDED;
+ 	    }
+ 	}
+ 	f++;
+-- 
+2.17.2
+
+
+From 4553645c00d9a2e81a79e2014b106f6590500287 Mon Sep 17 00:00:00 2001
+From: Kamil Dudka <kdudka@redhat.com>
+Date: Wed, 7 Nov 2018 14:04:56 +0100
+Subject: [PATCH 5/5] 43790: failed mailstat could leak memory
+
+Upstream-commit: d50e204b0c4c10164a711bf640500e46987de9c3
+Signed-off-by: Kamil Dudka <kdudka@redhat.com>
+
+Error: RESOURCE_LEAK (CWE-772):
+zsh-5.5.1/Src/utils.c:7406: alloc_fn: Storage is returned from allocation function "appstr".
+zsh-5.5.1/Src/string.c:200:5: alloc_fn: Storage is returned from allocation function "realloc".
+zsh-5.5.1/Src/string.c:200:5: identity_transfer: Passing "realloc(base, strlen(base) + strlen(append) + 1UL)" as argument 1 to function "strcat", which returns that argument.
+zsh-5.5.1/Src/string.c:200:5: return_alloc_fn: Directly returning storage allocated by "strcat".
+zsh-5.5.1/Src/utils.c:7406: var_assign: Assigning: "dir" = storage returned from "appstr(ztrdup(path), "/cur")".
+zsh-5.5.1/Src/utils.c:7407: noescape: Resource "dir" is not freed or pointed-to in "stat".
+zsh-5.5.1/Src/utils.c:7407: leaked_storage: Variable "dir" going out of scope leaks the storage it points to.
+7405|          /* See if cur/ is present */
+7406|          dir = appstr(ztrdup(path), "/cur");
+7407|->        if (stat(dir, &st_tmp) || !S_ISDIR(st_tmp.st_mode)) return 0;
+7408|          st_ret.st_atime = st_tmp.st_atime;
+7409|
+
+Error: RESOURCE_LEAK (CWE-772):
+zsh-5.5.1/Src/utils.c:7412: alloc_fn: Storage is returned from allocation function "appstr".
+zsh-5.5.1/Src/string.c:200:5: alloc_fn: Storage is returned from allocation function "realloc".
+zsh-5.5.1/Src/string.c:200:5: identity_transfer: Passing "realloc(base, strlen(base) + strlen(append) + 1UL)" as argument 1 to function "strcat", which returns that argument.
+zsh-5.5.1/Src/string.c:200:5: return_alloc_fn: Directly returning storage allocated by "strcat".
+zsh-5.5.1/Src/utils.c:7412: var_assign: Assigning: "dir" = storage returned from "appstr(dir, "/tmp")".
+zsh-5.5.1/Src/utils.c:7413: noescape: Resource "dir" is not freed or pointed-to in "stat".
+zsh-5.5.1/Src/utils.c:7413: leaked_storage: Variable "dir" going out of scope leaks the storage it points to.
+7411|          dir[plen] = 0;
+7412|          dir = appstr(dir, "/tmp");
+7413|->        if (stat(dir, &st_tmp) || !S_ISDIR(st_tmp.st_mode)) return 0;
+7414|          st_ret.st_mtime = st_tmp.st_mtime;
+7415|
+
+Error: RESOURCE_LEAK (CWE-772):
+zsh-5.5.1/Src/utils.c:7418: alloc_fn: Storage is returned from allocation function "appstr".
+zsh-5.5.1/Src/string.c:200:5: alloc_fn: Storage is returned from allocation function "realloc".
+zsh-5.5.1/Src/string.c:200:5: identity_transfer: Passing "realloc(base, strlen(base) + strlen(append) + 1UL)" as argument 1 to function "strcat", which returns that argument.
+zsh-5.5.1/Src/string.c:200:5: return_alloc_fn: Directly returning storage allocated by "strcat".
+zsh-5.5.1/Src/utils.c:7418: var_assign: Assigning: "dir" = storage returned from "appstr(dir, "/new")".
+zsh-5.5.1/Src/utils.c:7419: noescape: Resource "dir" is not freed or pointed-to in "stat".
+zsh-5.5.1/Src/utils.c:7419: leaked_storage: Variable "dir" going out of scope leaks the storage it points to.
+7417|          dir[plen] = 0;
+7418|          dir = appstr(dir, "/new");
+7419|->        if (stat(dir, &st_tmp) || !S_ISDIR(st_tmp.st_mode)) return 0;
+7420|          st_ret.st_mtime = st_tmp.st_mtime;
+7421|
+---
+ Src/utils.c | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/Src/utils.c b/Src/utils.c
+index b418517..492babc 100644
+--- a/Src/utils.c
++++ b/Src/utils.c
+@@ -7404,19 +7404,28 @@ mailstat(char *path, struct stat *st)
+ 
+        /* See if cur/ is present */
+        dir = appstr(ztrdup(path), "/cur");
+-       if (stat(dir, &st_tmp) || !S_ISDIR(st_tmp.st_mode)) return 0;
++       if (stat(dir, &st_tmp) || !S_ISDIR(st_tmp.st_mode)) {
++	   zsfree(dir);
++	   return 0;
++       }
+        st_ret.st_atime = st_tmp.st_atime;
+ 
+        /* See if tmp/ is present */
+        dir[plen] = 0;
+        dir = appstr(dir, "/tmp");
+-       if (stat(dir, &st_tmp) || !S_ISDIR(st_tmp.st_mode)) return 0;
++       if (stat(dir, &st_tmp) || !S_ISDIR(st_tmp.st_mode)) {
++	   zsfree(dir);
++	   return 0;
++       }
+        st_ret.st_mtime = st_tmp.st_mtime;
+ 
+        /* And new/ */
+        dir[plen] = 0;
+        dir = appstr(dir, "/new");
+-       if (stat(dir, &st_tmp) || !S_ISDIR(st_tmp.st_mode)) return 0;
++       if (stat(dir, &st_tmp) || !S_ISDIR(st_tmp.st_mode)) {
++	   zsfree(dir);
++	   return 0;
++       }
+        st_ret.st_mtime = st_tmp.st_mtime;
+ 
+ #if THERE_IS_EXACTLY_ONE_MAILDIR_IN_MAILPATH
+@@ -7428,6 +7437,7 @@ mailstat(char *path, struct stat *st)
+            st_tmp.st_atime == st_new_last.st_atime &&
+            st_tmp.st_mtime == st_new_last.st_mtime) {
+ 	   *st = st_ret_last;
++	   zsfree(dir);
+ 	   return 0;
+        }
+        st_new_last = st_tmp;
+-- 
+2.17.2
+
