@@ -1,0 +1,28 @@
+From 878ebe3c74cee4b9702c9672b87ee56f057e1f02 Mon Sep 17 00:00:00 2001
+From: Peter Stephenson <p.stephenson@samsung.com>
+Date: Thu, 29 Nov 2018 17:54:02 +0000
+Subject: [PATCH] 43854: Set tok to LEXERR on generic parse error.
+
+Needed by main loop which detects an error this way.
+
+Upstream-commit: ef20425381e83ebd5a10c2ab270a347018371162
+Signed-off-by: Kamil Dudka <kdudka@redhat.com>
+---
+ Src/lex.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Src/lex.c b/Src/lex.c
+index 44ad880..c29aaba 100644
+--- a/Src/lex.c
++++ b/Src/lex.c
+@@ -1613,6 +1613,7 @@ parsestr(char **s)
+ 		zerr("parse error near `%c'", err);
+ 	    else
+ 		zerr("parse error");
++	    tok = LEXERR;
+ 	}
+     }
+     return err;
+-- 
+2.17.2
+
